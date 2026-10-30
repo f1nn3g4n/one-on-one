@@ -1,0 +1,8 @@
+{
+  "name": "one-on-one",
+  "version": "1.0.0",
+  "description": "Prepares talking points and a shareable Claude Doc for biweekly 1-1s from your code host, ticket tracker, chat and design tool.",
+  "author": {
+    "name": "f1nn3g4n"
+  }
+}

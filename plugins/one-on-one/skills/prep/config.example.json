@@ -1,0 +1,68 @@
+{
+  "timezone": "America/New_York",
+  "platforms": {
+    "code": "github",
+    "tickets": "linear",
+    "messages": "slack",
+    "design": "figma"
+  },
+  "code": {
+    "user": "",
+    "orgs": []
+  },
+  "tickets": {
+    "user_id": "",
+    "name": "",
+    "in_progress_state": "In Progress",
+    "review_states": [
+      "In Review",
+      "Code Review",
+      "Ready for Review"
+    ],
+    "cycle_team": "",
+    "cycle_team_id": "",
+    "estimate_field": "",
+    "exclude": {
+      "teams": [],
+      "projects": [],
+      "labels": []
+    },
+    "skip_comments": {
+      "labels": [],
+      "title_prefixes": []
+    }
+  },
+  "messages": {
+    "user_id": "",
+    "min_messages": 10,
+    "min_dm_messages": 5,
+    "skip_channels": [
+      "support",
+      "customer",
+      "escalation",
+      "hr",
+      "legal"
+    ]
+  },
+  "design": {
+    "user_id": ""
+  },
+  "estimates": {
+    "points_to_days": {
+      "0": 0.5,
+      "1": 1,
+      "2": 2,
+      "3": 3,
+      "5": 5,
+      "8": 8
+    },
+    "thresholds": {
+      "ahead": 0.8,
+      "over": 1.2
+    }
+  },
+  "sensitive_data": {
+    "rules": [],
+    "contact": ""
+  }
+}

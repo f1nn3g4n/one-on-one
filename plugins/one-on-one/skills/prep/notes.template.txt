@@ -1,0 +1,36 @@
+1-1 NOTES
+
+Save this as plain text anywhere (TextEdit: Format > Make Plain Text), jot things down as they happen, then pass the file to the command:
+
+    /one-on-one:prep ~/path/to/notes.txt
+
+Rich text (.rtf), Word (.docx) and Markdown (.md) files work too. They're converted to plain text first, so formatting is ignored.
+
+Notes rank first among talking points and get their own "From my notes" section in the doc.
+
+
+COMMANDS
+
+A line starting with "claude:" is an instruction for this run, not a note. It isn't copied into the doc. Use it to point at work the tools can't see, or to shape the write-up (these examples are indented, so they don't run):
+
+    claude: I worked on the training repo this cycle, look at ~/repos/training
+    claude: Look at acme/infra too, I reviewed PRs there
+    claude: Lead with the Mailjet migration
+    claude: Leave out the hotfix on Oct 12
+
+- Start the line with "claude:", or with a bullet then "claude:" ("- claude: ..."). Case doesn't matter. Indented "claude:" lines on their own are treated as notes.
+- One command per line. To continue a long one, indent the next lines under it.
+- Commands only read things. Anything that would post, send, comment or commit is skipped, and so is anything the data rules forbid (ticket descriptions, other people's messages, support or customer channels).
+- The run ends by listing any command it skipped or couldn't complete.
+
+
+WINS THE TOOLS WON'T SEE
+(mentoring, pairing, incident help, a talk you gave, a process you fixed)
+
+
+THINGS I WANT TO RAISE
+(blockers, asks, career topics, feedback)
+
+
+CONTEXT FOR MY MANAGER
+(why something took longer, scope that changed, decisions made off-ticket)

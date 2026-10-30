@@ -1,0 +1,14 @@
+{
+  "name": "developer-summary",
+  "description": "Claude Code plugins for engineers.",
+  "owner": {
+    "name": "f1nn3g4n"
+  },
+  "plugins": [
+    {
+      "name": "one-on-one",
+      "source": "./plugins/one-on-one",
+      "description": "Prepares talking points and a shareable Claude Doc for biweekly 1-1s from your code host, ticket tracker, chat and design tool."
+    }
+  ]
+}
