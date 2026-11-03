@@ -74,6 +74,15 @@ The doc includes the current cycle (Linear) or sprint (Jira) for the team or boa
 
 Each run is saved under `~/.one-on-one/runs/<start>_<end>/`. The next run uses it for trends and to carry over follow-ups.
 
+### PR Churn
+
+The doc has a PR Churn section showing where your PRs' time went:
+- **Open to merged:** from creating the PR to merging it.
+- **Waiting for review:** from your latest push to the next comment or review from someone else.
+- **Your response time:** from a reviewer's comment or change request to your next comment or push.
+
+Each shows an average and a median, compared with last period. Only weekdays count, and time before a PR is ready for review is left out. Bots, bare approvals and release merges don't count. Reviewers are never named. The section also lists any PRs still waiting for a review.
+
 ### How output vs estimates is measured
 
 For each estimated ticket, the actual time starts at whichever came first: the ticket entering **In Progress**, or the first commit of a linked PR. Commits that also appear in your earlier PRs, such as the parent of a stacked branch, are ignored. It ends when the first linked PR was **ready for review**, and only weekdays count. Tracker integrations can move tickets to In Progress when the PR opens, often after the work started, so the first commit catches the earlier start. That's compared with `estimates.points_to_days` in your config:

@@ -32,7 +32,8 @@ MIN_PACE_TICKETS = 3
 # Release branch merges replay a whole release's diff, so they swamp the user's own line counts.
 RELEASE_MERGE_RE = re.compile(r"\bmerge release/", re.IGNORECASE)
 
-TREND_KEYS = ["prs_merged", "reviews_given", "tickets_completed", "points_completed", "design_comments"]
+TREND_KEYS = ["prs_merged", "reviews_given", "tickets_completed", "points_completed", "design_comments",
+              "pr_open_to_merge_hours", "review_wait_hours", "review_response_hours"]
 # Runs saved before the data format was named by role still hold these keys.
 LEGACY_TOTALS = {"tickets_completed": "linear_completed", "design_comments": "figma_comments"}
 
@@ -59,6 +60,10 @@ def in_period(value, bounds):
 def working_days_between(start, end, tz):
     """Elapsed weekday time in days. Counts 24h per weekday rather than office hours,
     which matches how the sizing guideline is talked about ("about two days")."""
+    return round(weekday_seconds(start, end, tz) / 86400, 2)
+
+
+def weekday_seconds(start, end, tz):
     if end <= start:
         return 0.0
     start, end = start.astimezone(tz), end.astimezone(tz)
@@ -70,7 +75,7 @@ def working_days_between(start, end, tz):
         if cur.weekday() < 5:
             total += step_end - cur
         cur = step_end
-    return round(total.total_seconds() / 86400, 2)
+    return total.total_seconds()
 
 
 def week_start(dt, tz):
@@ -234,6 +239,71 @@ def cycle_outlook(raw, config, bounds, tz, estimates):
     }
 
 
+def summarize(hours):
+    if not hours:
+        return {"count": 0, "average_hours": None, "median_hours": None, "max_hours": None}
+    return {"count": len(hours), "average_hours": round(sum(hours) / len(hours), 1),
+            "median_hours": round(statistics.median(hours), 1), "max_hours": round(max(hours), 1)}
+
+
+def pr_churn(raw, bounds, tz):
+    """How long the user's PRs sat open, waited on reviewers, and waited on the user.
+    Hours are weekday hours (24 per weekday), like the estimates. Only time after a PR
+    is ready for review counts, since draft feedback isn't a review queue."""
+    def hours(a, b):
+        return round(weekday_seconds(a, b, tz) / 3600, 1)
+
+    open_to_merge, review_waits, response_waits, rows, waiting = [], [], [], [], []
+    for pr in raw.get("code", {}).get("prs_authored", []):
+        if RELEASE_MERGE_RE.search(pr.get("title") or ""):
+            continue
+        created, ready, merged = (parse_ts(pr.get(k)) for k in ("created_at", "ready_at", "merged_at"))
+        merged_in_period = merged is not None and bounds[0] <= merged < bounds[1]
+        if merged_in_period:
+            open_to_merge.append(hours(created, merged))
+        pr_review, pr_response = [], []
+        if ready is not None:
+            end = min(merged or bounds[1], bounds[1])
+            review_since, author_since = ready, None
+            for e in pr.get("activity") or []:
+                t = parse_ts(e["at"])
+                if t < ready or t > end or e["by"] == "bot":
+                    continue
+                if e["by"] == "author":
+                    if author_since is not None:
+                        pr_response.append((t, hours(author_since, t)))
+                        author_since = None
+                    if e["kind"] == "commit":
+                        # The wait for review restarts from the latest push.
+                        review_since = t
+                    continue
+                if review_since is not None:
+                    pr_review.append((t, hours(review_since, t)))
+                    review_since = None
+                asks = e["kind"] == "comment" or e.get("has_text") or e.get("state") == "CHANGES_REQUESTED"
+                if asks and author_since is None:
+                    author_since = t
+            if merged is None and review_since is not None and review_since < bounds[1]:
+                waiting.append({"repo": pr["repo"], "number": pr["number"], "title": pr.get("title"),
+                                "url": pr.get("url"), "waiting_hours": hours(review_since, bounds[1])})
+        # A wait belongs to the period it ended in, so one long wait isn't counted twice.
+        review_waits += [h for t, h in pr_review if bounds[0] <= t < bounds[1]]
+        response_waits += [h for t, h in pr_response if bounds[0] <= t < bounds[1]]
+        if merged_in_period:
+            rows.append({"repo": pr["repo"], "number": pr["number"], "title": pr.get("title"), "url": pr.get("url"),
+                         "open_to_merge_hours": open_to_merge[-1],
+                         "waiting_on_review_hours": round(sum(h for _, h in pr_review), 1),
+                         "waiting_on_author_hours": round(sum(h for _, h in pr_response), 1),
+                         "review_rounds": len(pr_review)})
+    return {
+        "open_to_merge": summarize(open_to_merge),
+        "review_wait": summarize(review_waits),
+        "review_response": summarize(response_waits),
+        "waiting_on_review": sorted(waiting, key=lambda w: -w["waiting_hours"]),
+        "prs": sorted(rows, key=lambda r: -r["open_to_merge_hours"]),
+    }
+
+
 def compute(raw, config, previous):
     tz_name = config.get("timezone")
     tz = ZoneInfo(tz_name) if tz_name and ZoneInfo else timezone.utc
@@ -313,6 +383,11 @@ def compute(raw, config, previous):
         weeks[week_start(parse_ts(i["completed_at"]), tz)]["tickets_completed"] += 1
     activity_by_week = [{"week_of": k, **v} for k, v in sorted(weeks.items())]
 
+    churn = pr_churn(raw, bounds, tz)
+    totals["pr_open_to_merge_hours"] = churn["open_to_merge"]["average_hours"]
+    totals["review_wait_hours"] = churn["review_wait"]["average_hours"]
+    totals["review_response_hours"] = churn["review_response"]["average_hours"]
+
     estimates = estimate_rows(raw, config, bounds, tz)
     status_counts = defaultdict(int)
     for e in estimates:
@@ -326,7 +401,7 @@ def compute(raw, config, previous):
             "previous_period": previous.get("period"),
             "metrics": {
                 k: {"current": totals[k], "previous": prev[k],
-                    "delta": None if prev[k] is None else totals[k] - prev[k]}
+                    "delta": None if prev[k] is None or totals[k] is None else round(totals[k] - prev[k], 1)}
                 for k in TREND_KEYS
             },
         }
@@ -340,6 +415,7 @@ def compute(raw, config, previous):
         "estimate_summary": dict(sorted(status_counts.items())),
         "trend": trend,
         "cycle": cycle_outlook(raw, config, bounds, tz, estimates),
+        "churn": churn,
         "charts": {
             "activity_by_week": activity_by_week,
             "activity_by_repo": activity_by_repo,

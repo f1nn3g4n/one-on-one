@@ -45,6 +45,32 @@ def in_range(ts, start, end):
     return ts is not None and start <= ts[:10] <= end
 
 
+def is_bot(user):
+    return (user or {}).get("type") == "Bot" or (user or {}).get("login", "").endswith("[bot]")
+
+
+def activity(repo, number, login, commits):
+    """Who did what when on the user's PR, for PR Churn. Commits use the committer
+    date, which a rebase or amend resets to roughly when it was pushed; the author
+    date can be days older. Other people are recorded only as "other", never by name."""
+    def by(user):
+        return "bot" if is_bot(user) else "author" if user["login"] == login else "other"
+
+    events = [{"at": c["commit"]["committer"]["date"], "kind": "commit", "by": "author", "state": None, "has_text": None}
+              for c in commits]
+    for r in api(f"repos/{repo}/pulls/{number}/reviews"):
+        if r.get("submitted_at") and r.get("user"):
+            # An approval with no text asks nothing of the author, so it ends a review
+            # wait without starting a response wait.
+            events.append({"at": r["submitted_at"], "kind": "review", "by": by(r["user"]), "state": r["state"],
+                           "has_text": bool((r.get("body") or "").strip())})
+    for path in (f"repos/{repo}/pulls/{number}/comments", f"repos/{repo}/issues/{number}/comments"):
+        for c in api(path):
+            if c.get("user"):
+                events.append({"at": c["created_at"], "kind": "comment", "by": by(c["user"]), "state": None, "has_text": True})
+    return sorted(events, key=lambda e: e["at"])
+
+
 def set_first_commits(prs):
     """Stacked PRs list their parent's commits too (and again after the parent is
     squash-merged and the base retargets), so a commit only counts toward the
@@ -93,10 +119,8 @@ def main(argv=None):
                 # Never-drafted PRs have no event; they were ready when opened.
                 ready_at = min(ready_events) if ready_events else pr["created_at"]
             state = "merged" if pr.get("merged_at") else pr["state"]
-            commits = [
-                (c["commit"]["author"]["date"], c["commit"]["message"].split("\n", 1)[0])
-                for c in api(f"repos/{repo}/pulls/{number}/commits")
-            ]
+            raw_commits = api(f"repos/{repo}/pulls/{number}/commits")
+            commits = [(c["commit"]["author"]["date"], c["commit"]["message"].split("\n", 1)[0]) for c in raw_commits]
             result["prs_authored"].append({
                 "repo": repo, "number": number, "title": pr["title"], "url": url,
                 "state": state, "created_at": pr["created_at"], "ready_at": ready_at,
@@ -104,6 +128,7 @@ def main(argv=None):
                 "merged_at": pr.get("merged_at"),
                 "additions": pr.get("additions"), "deletions": pr.get("deletions"),
                 "ticket_ids": sorted(set(TICKET_RE.findall(pr["title"] + " " + pr["head"]["ref"].upper()))),
+                "activity": activity(repo, number, login, raw_commits),
             })
             continue
 

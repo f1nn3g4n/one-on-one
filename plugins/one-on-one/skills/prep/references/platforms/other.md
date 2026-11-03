@@ -27,6 +27,7 @@ A feature that needs a missing capability is left out of the doc, with the reaso
 | code | Your PRs/MRs with created, merged, and (for drafts) ready-for-review times | Counts, estimates |
 | code | Commit author dates per PR | Earlier start signal for estimates |
 | code | Reviews you gave, with state | Reviews in the doc |
+| code | Commits, reviews and comments on your PRs, with times and whether each is yours | PR Churn |
 | tickets | Your assigned tickets with title, status category, estimate, completed time | Counts, points |
 | tickets | Status change history | Output vs estimates |
 | tickets | Current sprint or cycle with dates and its tickets | Cycle outlook |

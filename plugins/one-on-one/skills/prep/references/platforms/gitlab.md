@@ -20,4 +20,9 @@ Use the `glab` CLI if it's installed and authenticated (`glab auth status`). Its
   - **First commit:** the earliest `authored_date` from `projects/<id>/merge_requests/<iid>/commits`, with the same stacked-branch exclusion as GitHub.
   - **Lines:** `projects/<id>/merge_requests/<iid>/diffs`. Count `+` and `-` lines in each `diff`, not the `+++` and `---` headers. If that's too heavy, leave `additions`/`deletions` `null` and record a gap.
   - **`ticket_ids`:** ticket keys from the title and `source_branch`.
+  - **`activity` (for PR Churn):**
+    - Commits: `committed_date` from the commits call.
+    - Comments: non-system notes from `projects/<id>/merge_requests/<iid>/notes`. Read only each note's `author` and `created_at`; don't keep the body.
+    - Reviews: approvals from the MR's `approved` system notes, with state `APPROVED`. "Requested changes" system notes map to `CHANGES_REQUESTED`.
+    - Mark each event `author`, `other` or `bot` (`author.bot` is true, or the username ends in `_bot`).
 - `repo` is `path_with_namespace`, `number` is `iid`, and `url` is `web_url`.

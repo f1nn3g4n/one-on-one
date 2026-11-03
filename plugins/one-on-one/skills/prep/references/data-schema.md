@@ -17,7 +17,12 @@ Each role holds the same shape whatever platform it came from, so `metrics.py` a
         "state": "merged",
         "created_at": "...", "ready_at": "...", "first_commit_at": "...", "merged_at": "...",
         "additions": 220, "deletions": 40,
-        "ticket_ids": ["ENG-123"]
+        "ticket_ids": ["ENG-123"],
+        "activity": [
+          { "at": "...", "kind": "commit", "by": "author", "state": null, "has_text": null },
+          { "at": "...", "kind": "review", "by": "other", "state": "CHANGES_REQUESTED", "has_text": true },
+          { "at": "...", "kind": "comment", "by": "author", "state": null, "has_text": true }
+        ]
       }
     ],
     "reviews": [
@@ -100,6 +105,11 @@ Each role holds the same shape whatever platform it came from, so `metrics.py` a
 - `ready_at` is when the PR became ready for review. Use `created_at` if it was never a draft, and `null` if it's still a draft or unknown.
 - `first_commit_at` is the author date of the PR's earliest commit that isn't also in one of the user's earlier PRs (stacked branches). `github_activity.py` fills it in for GitHub. Leave it `null` if it can't be found.
 - `ticket_ids` are ticket keys found in the PR title or branch.
+- `activity` is every commit, review and comment on the user's PR, oldest first, for PR Churn.
+  - `kind` is `commit`, `review` or `comment`. `by` is `author`, `other` or `bot`: never a name.
+  - Commits use the committer date, which tracks when they were pushed more closely than the author date.
+  - `has_text` is false for a review with no body, such as a bare approval.
+  - No comment text is stored. Leave `activity` `null` if the platform can't provide it; PR Churn then covers only open-to-merge time.
 - Tickets never carry a `description`. `status_type` is one of `completed`, `canceled`, `started`, `unstarted`, `backlog` or `triage`. Each platform guide says how its states map onto these.
 - `tickets.cycle` is the current cycle or sprint, or `null` when there isn't one or the platform has none. Its `issues` are every ticket assigned to the user in it, whatever their status.
 - `notes` is `null` when no notes file was passed. `kind` is `source` (go and look at something) or `framing` (shapes the write-up). `status` is `done`, `skipped` or `failed`; for the last two, `summary` says why. `summary` paraphrases what was found. Command text is kept here and in `run.json` so the user can see what ran, but never goes into the doc.

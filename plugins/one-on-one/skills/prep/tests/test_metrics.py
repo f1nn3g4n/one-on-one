@@ -253,6 +253,84 @@ class CycleOutlook(unittest.TestCase):
         self.assertIsNone(metrics.compute(raw(), CONFIG, None)["cycle"])
 
 
+def ev(at, kind, by, state=None, has_text=None):
+    return {"at": at, "kind": kind, "by": by, "state": state, "has_text": has_text}
+
+
+def churn_raw():
+    r = raw()
+    r["code"]["prs_authored"] = [
+        {"repo": "acme/app", "number": 20, "title": "feat", "url": "p20", "state": "merged",
+         "created_at": "2026-10-05T09:00:00Z", "ready_at": "2026-10-05T09:00:00Z",
+         "merged_at": "2026-10-07T16:00:00Z", "additions": 1, "deletions": 0, "ticket_ids": [],
+         "activity": [
+             ev("2026-10-05T09:00:00Z", "commit", "author"),
+             ev("2026-10-05T09:05:00Z", "comment", "bot"),
+             # Reviewer asks for changes a day after the push.
+             ev("2026-10-06T09:00:00Z", "comment", "other", has_text=True),
+             # The fix lands 6 hours later, which restarts the wait for review.
+             ev("2026-10-06T15:00:00Z", "commit", "author"),
+             # A bare approval ends the review wait without asking anything of the author.
+             ev("2026-10-07T15:00:00Z", "review", "other", "APPROVED", False),
+         ]},
+        # Draft over the weekend; only time from Monday's ready counts.
+        {"repo": "acme/app", "number": 21, "title": "draft", "url": "p21", "state": "open",
+         "created_at": "2026-10-09T09:00:00Z", "ready_at": "2026-10-13T10:00:00Z",
+         "merged_at": None, "additions": 1, "deletions": 0, "ticket_ids": [],
+         "activity": [
+             ev("2026-10-09T09:00:00Z", "commit", "author"),
+             ev("2026-10-09T12:00:00Z", "comment", "other", has_text=True),
+         ]},
+        {"repo": "acme/app", "number": 22, "title": "Merge release/7.25 into main", "url": "p22", "state": "merged",
+         "created_at": "2026-10-01T09:00:00Z", "ready_at": "2026-10-01T09:00:00Z",
+         "merged_at": "2026-10-12T09:00:00Z", "additions": 1, "deletions": 0, "ticket_ids": [], "activity": []},
+    ]
+    return r
+
+
+class PrChurn(unittest.TestCase):
+    def setUp(self):
+        self.m = metrics.compute(churn_raw(), CONFIG, None)
+        self.c = self.m["churn"]
+
+    def test_open_to_merge_skips_release_merges(self):
+        self.assertEqual(self.c["open_to_merge"]["count"], 1)
+        self.assertEqual(self.c["open_to_merge"]["average_hours"], 55.0)
+
+    def test_review_wait_runs_from_latest_push(self):
+        self.assertEqual(self.c["review_wait"]["count"], 2)
+        self.assertEqual(self.c["review_wait"]["average_hours"], 24.0)
+
+    def test_response_wait_ignores_bots_and_bare_approvals(self):
+        self.assertEqual(self.c["review_response"]["count"], 1)
+        self.assertEqual(self.c["review_response"]["average_hours"], 6.0)
+
+    def test_draft_feedback_ignored_and_open_wait_reported(self):
+        waiting = self.c["waiting_on_review"]
+        self.assertEqual([w["number"] for w in waiting], [21])
+        self.assertEqual(waiting[0]["waiting_hours"], 38.0)
+
+    def test_per_pr_row_and_totals(self):
+        row = self.c["prs"][0]
+        self.assertEqual((row["number"], row["waiting_on_review_hours"], row["waiting_on_author_hours"],
+                          row["review_rounds"]), (20, 48.0, 6.0, 2))
+        self.assertEqual(self.m["totals"]["review_wait_hours"], 24.0)
+
+    def test_weekend_excluded(self):
+        r = churn_raw()
+        pr = r["code"]["prs_authored"][0]
+        # Ready Friday 17:00, first review Monday 09:00: 7 + 9 weekday hours.
+        pr["ready_at"] = pr["created_at"] = "2026-10-09T17:00:00Z"
+        pr["merged_at"] = "2026-10-12T10:00:00Z"
+        pr["activity"] = [ev("2026-10-12T09:00:00Z", "review", "other", "APPROVED", False)]
+        c = metrics.compute(r, CONFIG, None)["churn"]
+        self.assertEqual(c["review_wait"]["average_hours"], 16.0)
+
+    def test_no_activity_is_empty_not_error(self):
+        c = metrics.compute(raw(), CONFIG, None)["churn"]
+        self.assertEqual(c["review_wait"], {"count": 0, "average_hours": None, "median_hours": None, "max_hours": None})
+
+
 class Previous(unittest.TestCase):
     def test_finds_latest_before(self):
         with tempfile.TemporaryDirectory() as d:
