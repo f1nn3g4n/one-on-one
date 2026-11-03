@@ -31,7 +31,7 @@ scripts/package.sh
 This builds `dist/one-on-one-<version>.zip` from the committed files, with `plugin.json` at the zip's root, and validates it. Commit your changes first, or the script refuses to run. Load the zip into a Claude Code session with:
 
 ```bash
-claude --plugin-dir one-on-one-1.0.0.zip
+claude --plugin-dir one-on-one-1.1.0.zip
 ```
 
 `--plugin-dir` loads the plugin for that session only. The same zip works for plugin uploads that expect `.claude-plugin/plugin.json` at the root.
