@@ -31,7 +31,7 @@ scripts/package.sh
 This builds `dist/one-on-one-<version>.zip` from the committed files, with `plugin.json` at the zip's root, and validates it. Commit your changes first, or the script refuses to run. Load the zip into a Claude Code session with:
 
 ```bash
-claude --plugin-dir one-on-one-1.1.0.zip
+claude --plugin-dir one-on-one-1.2.0.zip
 ```
 
 `--plugin-dir` loads the plugin for that session only. The same zip works for plugin uploads that expect `.claude-plugin/plugin.json` at the root.
@@ -76,12 +76,13 @@ Each run is saved under `~/.one-on-one/runs/<start>_<end>/`. The next run uses i
 
 ### PR Churn
 
-The doc has a PR Churn section showing where your PRs' time went:
-- **Open to merged:** from creating the PR to merging it.
-- **Waiting for review:** from your latest push to the next comment or review from someone else.
-- **Your response time:** from a reviewer's comment or change request to your next comment or push.
+The doc has a PR Churn section showing how long your merged PRs sat in each stage:
+- **Draft:** from creating the PR to marking it ready for review.
+- **Time to first review:** from ready to the first comment or review from someone other than you.
+- **Time in review:** from that first review to the last approval.
+- **Approval to merge:** from the last approval to the merge.
 
-Each shows an average and a median, compared with last period. Only weekdays count, and time before a PR is ready for review is left out. Bots, bare approvals and release merges don't count. Reviewers are never named. The section also lists any PRs still waiting for a review.
+Each stage shows an average and a median, compared with last period. Only weekdays count. Bots and release merges are left out. A PR merged without a review or an approval is left out of the stages it never reached, and the doc says how many. Reviewers are never named. The section also lists open PRs with the stage each is in.
 
 ### How output vs estimates is measured
 

@@ -33,7 +33,8 @@ MIN_PACE_TICKETS = 3
 RELEASE_MERGE_RE = re.compile(r"\bmerge release/", re.IGNORECASE)
 
 TREND_KEYS = ["prs_merged", "reviews_given", "tickets_completed", "points_completed", "design_comments",
-              "pr_open_to_merge_hours", "review_wait_hours", "review_response_hours"]
+              "pr_open_to_merge_hours", "draft_hours", "first_review_hours", "in_review_hours",
+              "approval_to_merge_hours"]
 # Runs saved before the data format was named by role still hold these keys.
 LEGACY_TOTALS = {"tickets_completed": "linear_completed", "design_comments": "figma_comments"}
 
@@ -246,60 +247,69 @@ def summarize(hours):
             "median_hours": round(statistics.median(hours), 1), "max_hours": round(max(hours), 1)}
 
 
+STAGES = ["draft", "first_review", "in_review", "approval_to_merge"]
+
+
 def pr_churn(raw, bounds, tz):
-    """How long the user's PRs sat open, waited on reviewers, and waited on the user.
-    Hours are weekday hours (24 per weekday), like the estimates. Only time after a PR
-    is ready for review counts, since draft feedback isn't a review queue."""
+    """Where the user's merged PRs spent their time, stage by stage:
+    created → ready for review → first review from someone else → last approval → merged.
+    Hours are weekday hours (24 per weekday), like the estimates. Bots and the author
+    never count as a review. A stage whose end never happened (merged with no approval)
+    is left out rather than folded into a neighbour, and the PR is counted under `skipped`."""
     def hours(a, b):
         return round(weekday_seconds(a, b, tz) / 3600, 1)
 
-    open_to_merge, review_waits, response_waits, rows, waiting = [], [], [], [], []
+    stages = {k: [] for k in STAGES}
+    totals, rows, open_prs = [], [], []
+    skipped = {"no_review": 0, "no_approval": 0}
     for pr in raw.get("code", {}).get("prs_authored", []):
         if RELEASE_MERGE_RE.search(pr.get("title") or ""):
             continue
         created, ready, merged = (parse_ts(pr.get(k)) for k in ("created_at", "ready_at", "merged_at"))
-        merged_in_period = merged is not None and bounds[0] <= merged < bounds[1]
-        if merged_in_period:
-            open_to_merge.append(hours(created, merged))
-        pr_review, pr_response = [], []
-        if ready is not None:
-            end = min(merged or bounds[1], bounds[1])
-            review_since, author_since = ready, None
-            for e in pr.get("activity") or []:
-                t = parse_ts(e["at"])
-                if t < ready or t > end or e["by"] == "bot":
-                    continue
-                if e["by"] == "author":
-                    if author_since is not None:
-                        pr_response.append((t, hours(author_since, t)))
-                        author_since = None
-                    if e["kind"] == "commit":
-                        # The wait for review restarts from the latest push.
-                        review_since = t
-                    continue
-                if review_since is not None:
-                    pr_review.append((t, hours(review_since, t)))
-                    review_since = None
-                asks = e["kind"] == "comment" or e.get("has_text") or e.get("state") == "CHANGES_REQUESTED"
-                if asks and author_since is None:
-                    author_since = t
-            if merged is None and review_since is not None and review_since < bounds[1]:
-                waiting.append({"repo": pr["repo"], "number": pr["number"], "title": pr.get("title"),
-                                "url": pr.get("url"), "waiting_hours": hours(review_since, bounds[1])})
-        # A wait belongs to the period it ended in, so one long wait isn't counted twice.
-        review_waits += [h for t, h in pr_review if bounds[0] <= t < bounds[1]]
-        response_waits += [h for t, h in pr_response if bounds[0] <= t < bounds[1]]
-        if merged_in_period:
-            rows.append({"repo": pr["repo"], "number": pr["number"], "title": pr.get("title"), "url": pr.get("url"),
-                         "open_to_merge_hours": open_to_merge[-1],
-                         "waiting_on_review_hours": round(sum(h for _, h in pr_review), 1),
-                         "waiting_on_author_hours": round(sum(h for _, h in pr_response), 1),
-                         "review_rounds": len(pr_review)})
+        end = merged or bounds[1]
+        reviews = [e for e in pr.get("activity") or []
+                   if e["by"] == "other" and e["kind"] in ("review", "comment")
+                   and ready is not None and ready <= parse_ts(e["at"]) <= end]
+        first_review = parse_ts(reviews[0]["at"]) if reviews else None
+        approvals = [parse_ts(e["at"]) for e in reviews if e.get("state") == "APPROVED"]
+        last_approval = approvals[-1] if approvals else None
+
+        if merged is None:
+            if pr.get("state") == "open":
+                stage, since = (("draft", created) if ready is None
+                                else ("first_review", ready) if first_review is None
+                                else ("in_review", first_review) if last_approval is None
+                                else ("approval_to_merge", last_approval))
+                open_prs.append({"repo": pr["repo"], "number": pr["number"], "title": pr.get("title"),
+                                 "url": pr.get("url"), "stage": stage, "hours_in_stage": hours(since, bounds[1])})
+            continue
+        if not bounds[0] <= merged < bounds[1]:
+            continue
+
+        row = {"repo": pr["repo"], "number": pr["number"], "title": pr.get("title"), "url": pr.get("url"),
+               "open_to_merge_hours": hours(created, merged)}
+        row["draft"] = hours(created, ready or created)
+        if first_review is None:
+            skipped["no_review"] += 1
+            row.update(first_review=None, in_review=None, approval_to_merge=None)
+        else:
+            row["first_review"] = hours(ready, first_review)
+            if last_approval is None:
+                skipped["no_approval"] += 1
+                row.update(in_review=None, approval_to_merge=None)
+            else:
+                row["in_review"] = hours(first_review, last_approval)
+                row["approval_to_merge"] = hours(last_approval, merged)
+        for k in STAGES:
+            if row[k] is not None:
+                stages[k].append(row[k])
+        totals.append(row["open_to_merge_hours"])
+        rows.append(row)
     return {
-        "open_to_merge": summarize(open_to_merge),
-        "review_wait": summarize(review_waits),
-        "review_response": summarize(response_waits),
-        "waiting_on_review": sorted(waiting, key=lambda w: -w["waiting_hours"]),
+        **{k: summarize(v) for k, v in stages.items()},
+        "open_to_merge": summarize(totals),
+        "skipped": skipped,
+        "open_prs": sorted(open_prs, key=lambda o: -o["hours_in_stage"]),
         "prs": sorted(rows, key=lambda r: -r["open_to_merge_hours"]),
     }
 
@@ -385,8 +395,8 @@ def compute(raw, config, previous):
 
     churn = pr_churn(raw, bounds, tz)
     totals["pr_open_to_merge_hours"] = churn["open_to_merge"]["average_hours"]
-    totals["review_wait_hours"] = churn["review_wait"]["average_hours"]
-    totals["review_response_hours"] = churn["review_response"]["average_hours"]
+    for stage in STAGES:
+        totals[f"{stage}_hours"] = churn[stage]["average_hours"]
 
     estimates = estimate_rows(raw, config, bounds, tz)
     status_counts = defaultdict(int)

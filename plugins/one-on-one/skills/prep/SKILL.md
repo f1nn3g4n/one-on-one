@@ -116,12 +116,15 @@ It also writes `cycle`, the outlook for the current cycle or sprint as of the en
 - Tickets whose state is in `tickets.review_states` (default In Review, Code Review, Ready for Review) or that have a linked PR ready for review count as in review: their estimate is spent, so they aren't remaining work.
 - `load` is projected remaining days ÷ working days left. `status` is `under` (≤ the ahead threshold: room for more), `on_track`, `over` (more assigned than fits), or `ended` (the cycle closed within the period with nothing open).
 
-It also writes `churn`, for the doc's PR Churn section, from each authored PR's `activity`. All times are weekday hours, and only count once the PR is ready for review. Release merges are left out.
-- `open_to_merge`: created to merged, for PRs merged in the period.
-- `review_wait`: the user's latest push (or ready for review) to the next review or comment from someone else.
-- `review_response`: a comment or change request from someone else to the user's next comment or push. A bare approval asks nothing, so it doesn't start a wait.
-- Each holds `count`, `average_hours`, `median_hours` and `max_hours`. A wait counts in the period it ended in.
-- `prs` has per-PR totals for the chart. `waiting_on_review` lists open PRs still waiting for review at the period's end.
+It also writes `churn`, for the doc's PR Churn section, from each authored PR's `activity`. It covers PRs merged in the period, minus release merges. The stages, in order:
+- `draft`: created to ready for review (0 if the PR never was a draft).
+- `first_review`: ready for review to the first review or comment from someone other than the author. Bots don't count.
+- `in_review`: that first review to the last approval before merge.
+- `approval_to_merge`: the last approval to merged.
+
+Each stage holds `count`, `average_hours`, `median_hours` and `max_hours`, in weekday hours. `open_to_merge` is the same for the whole PR.
+
+A PR merged with no review, or no approval, is left out of the stages it never reached rather than having that time folded into another stage. It's counted in `skipped.no_review` or `skipped.no_approval`. `prs` has per-PR stage hours for the chart. `open_prs` lists PRs still open at the period's end with their current stage and how long they've been in it.
 
 ## 5. Highlights (judgment)
 

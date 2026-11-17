@@ -266,24 +266,30 @@ def churn_raw():
          "activity": [
              ev("2026-10-05T09:00:00Z", "commit", "author"),
              ev("2026-10-05T09:05:00Z", "comment", "bot"),
-             # Reviewer asks for changes a day after the push.
+             # First review a day after ready.
              ev("2026-10-06T09:00:00Z", "comment", "other", has_text=True),
-             # The fix lands 6 hours later, which restarts the wait for review.
              ev("2026-10-06T15:00:00Z", "commit", "author"),
-             # A bare approval ends the review wait without asking anything of the author.
+             ev("2026-10-07T10:00:00Z", "review", "other", "APPROVED", False),
+             # The last approval, not the first, ends time in review.
              ev("2026-10-07T15:00:00Z", "review", "other", "APPROVED", False),
          ]},
-        # Draft over the weekend; only time from Monday's ready counts.
+        # Still a draft on Friday; feedback before ready isn't a review.
         {"repo": "acme/app", "number": 21, "title": "draft", "url": "p21", "state": "open",
          "created_at": "2026-10-09T09:00:00Z", "ready_at": "2026-10-13T10:00:00Z",
          "merged_at": None, "additions": 1, "deletions": 0, "ticket_ids": [],
-         "activity": [
-             ev("2026-10-09T09:00:00Z", "commit", "author"),
-             ev("2026-10-09T12:00:00Z", "comment", "other", has_text=True),
-         ]},
+         "activity": [ev("2026-10-09T12:00:00Z", "comment", "other", has_text=True)]},
         {"repo": "acme/app", "number": 22, "title": "Merge release/7.25 into main", "url": "p22", "state": "merged",
          "created_at": "2026-10-01T09:00:00Z", "ready_at": "2026-10-01T09:00:00Z",
          "merged_at": "2026-10-12T09:00:00Z", "additions": 1, "deletions": 0, "ticket_ids": [], "activity": []},
+        # Drafted over a weekend, then merged after a comment but no approval.
+        {"repo": "acme/app", "number": 23, "title": "fix", "url": "p23", "state": "merged",
+         "created_at": "2026-10-09T17:00:00Z", "ready_at": "2026-10-12T09:00:00Z",
+         "merged_at": "2026-10-12T12:00:00Z", "additions": 1, "deletions": 0, "ticket_ids": [],
+         "activity": [
+             ev("2026-10-12T09:30:00Z", "comment", "bot"),
+             ev("2026-10-12T10:00:00Z", "comment", "author", has_text=True),
+             ev("2026-10-12T11:00:00Z", "comment", "other", has_text=True),
+         ]},
     ]
     return r
 
@@ -293,42 +299,42 @@ class PrChurn(unittest.TestCase):
         self.m = metrics.compute(churn_raw(), CONFIG, None)
         self.c = self.m["churn"]
 
-    def test_open_to_merge_skips_release_merges(self):
-        self.assertEqual(self.c["open_to_merge"]["count"], 1)
-        self.assertEqual(self.c["open_to_merge"]["average_hours"], 55.0)
+    def test_draft_excludes_weekend(self):
+        # PR 20 was never a draft (0h); PR 23 was a draft Fri 17:00 → Mon 09:00 (7 + 9 weekday hours).
+        self.assertEqual((self.c["draft"]["count"], self.c["draft"]["average_hours"]), (2, 8.0))
 
-    def test_review_wait_runs_from_latest_push(self):
-        self.assertEqual(self.c["review_wait"]["count"], 2)
-        self.assertEqual(self.c["review_wait"]["average_hours"], 24.0)
+    def test_first_review_ignores_bots_and_author(self):
+        self.assertEqual(sorted(r["first_review"] for r in self.c["prs"]), [2.0, 24.0])
 
-    def test_response_wait_ignores_bots_and_bare_approvals(self):
-        self.assertEqual(self.c["review_response"]["count"], 1)
-        self.assertEqual(self.c["review_response"]["average_hours"], 6.0)
+    def test_in_review_runs_to_last_approval(self):
+        row = {r["number"]: r for r in self.c["prs"]}[20]
+        self.assertEqual((row["in_review"], row["approval_to_merge"]), (30.0, 1.0))
 
-    def test_draft_feedback_ignored_and_open_wait_reported(self):
-        waiting = self.c["waiting_on_review"]
-        self.assertEqual([w["number"] for w in waiting], [21])
-        self.assertEqual(waiting[0]["waiting_hours"], 38.0)
+    def test_no_approval_leaves_stages_out(self):
+        row = {r["number"]: r for r in self.c["prs"]}[23]
+        self.assertEqual((row["in_review"], row["approval_to_merge"]), (None, None))
+        self.assertEqual(self.c["skipped"], {"no_review": 0, "no_approval": 1})
+        self.assertEqual(self.c["in_review"]["count"], 1)
 
-    def test_per_pr_row_and_totals(self):
-        row = self.c["prs"][0]
-        self.assertEqual((row["number"], row["waiting_on_review_hours"], row["waiting_on_author_hours"],
-                          row["review_rounds"]), (20, 48.0, 6.0, 2))
-        self.assertEqual(self.m["totals"]["review_wait_hours"], 24.0)
+    def test_release_merges_skipped_and_totals(self):
+        self.assertEqual(self.c["open_to_merge"]["count"], 2)
+        self.assertEqual(self.m["totals"]["first_review_hours"], 13.0)
+        self.assertEqual(self.m["totals"]["pr_open_to_merge_hours"], 37.0)
 
-    def test_weekend_excluded(self):
+    def test_open_pr_reports_current_stage(self):
+        self.assertEqual([(o["number"], o["stage"], o["hours_in_stage"]) for o in self.c["open_prs"]],
+                         [(21, "first_review", 38.0)])
+
+    def test_merged_without_review(self):
         r = churn_raw()
-        pr = r["code"]["prs_authored"][0]
-        # Ready Friday 17:00, first review Monday 09:00: 7 + 9 weekday hours.
-        pr["ready_at"] = pr["created_at"] = "2026-10-09T17:00:00Z"
-        pr["merged_at"] = "2026-10-12T10:00:00Z"
-        pr["activity"] = [ev("2026-10-12T09:00:00Z", "review", "other", "APPROVED", False)]
+        r["code"]["prs_authored"][0]["activity"] = []
         c = metrics.compute(r, CONFIG, None)["churn"]
-        self.assertEqual(c["review_wait"]["average_hours"], 16.0)
+        self.assertEqual(c["skipped"]["no_review"], 1)
+        self.assertIsNone({x["number"]: x for x in c["prs"]}[20]["first_review"])
 
     def test_no_activity_is_empty_not_error(self):
         c = metrics.compute(raw(), CONFIG, None)["churn"]
-        self.assertEqual(c["review_wait"], {"count": 0, "average_hours": None, "median_hours": None, "max_hours": None})
+        self.assertEqual(c["in_review"], {"count": 0, "average_hours": None, "median_hours": None, "max_hours": None})
 
 
 class Previous(unittest.TestCase):
